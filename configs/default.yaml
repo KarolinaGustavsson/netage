@@ -1,0 +1,37 @@
+# AMORIS biological age pipeline — default configuration.
+# Copy and edit this file; do not commit modified versions with real data paths.
+
+data:
+  # Path to the raw AMORIS CSV (read-only; never written by the pipeline).
+  raw_path: /data/amoris/raw.csv
+  # Directory for preprocessed splits and the Preprocessor pickle.
+  derived_dir: outputs/derived/
+  split_seed: 42
+  train_frac: 0.70
+  val_frac: 0.15
+  # test_frac is derived as 1 - train_frac - val_frac = 0.15
+
+model:
+  hidden_sizes: [128, 64]
+  dropout: 0.2
+  activation: relu
+  n_features: 15          # base biomarker features; missing-indicator columns
+                          # are detected automatically from the preprocessed CSV
+
+training:
+  learning_rate: 0.0003   # AdamW; cosine schedule decays to 0
+  weight_decay: 0.0001
+  max_epochs: 200
+  patience: 20            # early stopping on validation C-index
+  batch_size: 4096
+  seed: 0
+
+bioage:
+  horizon_years: 10.0     # prediction horizon for mortality equivalence
+  age_grid_min: 30.0      # reference age grid lower bound
+  age_grid_max: 100.0     # reference age grid upper bound
+  age_grid_step: 0.1      # reference age grid spacing (years)
+
+attribution:
+  n_explain: 500          # number of test individuals to explain with SHAP
+                          # (increase for the final paper run; reduce for speed)
