@@ -1,0 +1,25 @@
+# Pre-specified biomarker groups for group-level attribution aggregation.
+# Membership is fixed before any attribution runs and must not be changed
+# based on observed feature importances.
+variable_groups:
+  lipid:
+    - cholesterol
+    - triglycerides
+    - hdl
+    - ldl
+  inflammation:
+    - crp
+    - wbc
+    - albumin
+  renal:
+    - creatinine
+    - uric_acid
+  hepatic:
+    - alp
+    - ggt
+    - alt
+  glycemic:
+    - glucose
+  hematologic:
+    - hemoglobin
+    - iron
