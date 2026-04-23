@@ -3,7 +3,7 @@
 
 data:
   # Path to the raw AMORIS CSV on tensor. Update as needed.
-  raw_path: /nfs/home/kargus/projects/netage-main/data/amoris/scrambled_b.csv
+  raw_path: /nfs/home/kargus/projects/netage/data/amoris/scrambled_b_bioage.csv
   derived_dir: ./outputs/derived/
   split_seed: 42
   train_frac: 0.70

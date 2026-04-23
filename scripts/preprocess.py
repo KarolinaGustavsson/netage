@@ -83,7 +83,7 @@ logger.info(
 )
 
 preprocessor = Preprocessor()
-train_pp = preprocessor.fit_transform(splits.train, FEATURE_COLS)
+train_pp = preprocessor.fit_transform(splits.train)
 val_pp = preprocessor.transform(splits.val)
 test_pp = preprocessor.transform(splits.test)
 

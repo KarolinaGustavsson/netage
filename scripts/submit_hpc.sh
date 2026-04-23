@@ -46,6 +46,9 @@ conda activate netage
 echo "Environment: $(which python)"
 echo ""
 
+# Set NumExpr threads to match SLURM allocation
+export NUMEXPR_MAX_THREADS="${SLURM_CPUS_PER_TASK:-12}"
+
 # Run pipeline stages
 case "$PIPELINE_STAGE" in
   preprocess)

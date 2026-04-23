@@ -56,9 +56,11 @@ FEATURE_COLS: Final[list[str]] = [
 ALL_COLS: Final[list[str]] = META_COLS + SURVIVAL_COLS + FEATURE_COLS
 
 # Column name mapping from scrambled_b.csv to schema
+# Handles both 'Kon' and 'gender' as sex column names
 CSV_COL_MAPPING: Final[dict[str, str]] = {
     "sampleID": "id",
     "Kon": "sex",
+    "gender": "sex",
     "age": "age_at_baseline",
     "lastAge": "age_at_exit",
     "status": "event",

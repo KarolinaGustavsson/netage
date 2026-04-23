@@ -35,6 +35,14 @@ def load_raw(path: str | Path) -> pd.DataFrame:
     
     _validate_columns(df)
     _cast_dtypes(df)
+    
+    # Filter out rows with invalid survival times (age_at_exit <= age_at_baseline)
+    n_before = len(df)
+    df = df[df["age_at_exit"] > df["age_at_baseline"]].copy()
+    n_removed = n_before - len(df)
+    if n_removed > 0:
+        logger.info("Removed %d rows with age_at_exit <= age_at_baseline", n_removed)
+    
     _validate_survival_times(df)
     _validate_event_codes(df)
 
