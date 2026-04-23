@@ -3,7 +3,7 @@
 
 data:
   # Path to the raw AMORIS CSV (read-only; never written by the pipeline).
-  raw_path: /data/amoris/raw.csv
+  raw_path: /Users/karolina.gustavsson/Library/CloudStorage/OneDrive-KarolinskaInstitutet/Coding_PhD_cloud/Project2/Scripts/NETAGE/netage-main/data/amoris/scrambled_b.csv
   # Directory for preprocessed splits and the Preprocessor pickle.
   derived_dir: outputs/derived/
   split_seed: 42
@@ -15,7 +15,7 @@ model:
   hidden_sizes: [128, 64]
   dropout: 0.2
   activation: relu
-  n_features: 15          # base biomarker features; missing-indicator columns
+  n_features: 17          # base biomarker features; missing-indicator columns
                           # are detected automatically from the preprocessed CSV
 
 training:

@@ -3,28 +3,32 @@
 # Column names must match FEATURE_COLS in src/amoris_bioage/data/schema.py.
 
 lipid:
-  - cholesterol
-  - triglycerides
-  - hdl
-  - ldl
+  - TC
+  - TG
 
 inflammation:
-  - crp
-  - wbc
-  - albumin
+  - S_Hapt
+  - S_Alb
 
 renal:
-  - creatinine
-  - uric_acid
+  - S_Krea
+  - S_Urat
+  - S_Urea
 
 hepatic:
-  - alp
-  - ggt
-  - alt
+  - S_Alp
+  - S_LD
 
 glycemic:
-  - glucose
+  - fS_Gluk
+  - S_FAMN
 
-hematologic:
-  - hemoglobin
-  - iron
+hematologic_iron:
+  - fS_Jaern
+  - fS_TIBC
+  - Fe_maet
+
+mineral_electrolyte:
+  - S_Ca
+  - S_P
+  - S_K

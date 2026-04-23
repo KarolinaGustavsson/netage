@@ -1,0 +1,33 @@
+# HPC (tensor cluster) configuration for AMORIS biological age pipeline.
+# Override default.yaml settings for HPC environment.
+
+data:
+  # Path to the raw AMORIS CSV on tensor. Update as needed.
+  raw_path: /nfs/home/kargus/projects/netage-main/data/amoris/scrambled_b.csv
+  derived_dir: ./outputs/derived/
+  split_seed: 42
+  train_frac: 0.70
+  val_frac: 0.15
+
+model:
+  hidden_sizes: [128, 64]
+  dropout: 0.2
+  activation: relu
+  n_features: 17
+
+training:
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  max_epochs: 200
+  patience: 20
+  batch_size: 4096      # CPU-friendly batch size (12 CPUs × 4096 = good utilization)
+  seed: 0
+
+bioage:
+  horizon_years: 10.0
+  age_grid_min: 30.0
+  age_grid_max: 100.0
+  age_grid_step: 0.1
+
+attribution:
+  n_explain: 500        # Full run; reduce for testing
