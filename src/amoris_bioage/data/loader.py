@@ -36,6 +36,11 @@ def load_raw(path: str | Path) -> pd.DataFrame:
     _validate_columns(df)
     _cast_dtypes(df)
     
+    # Remap sex from (1, 2) to (0, 1) if needed
+    if df["sex"].min() >= 1 and df["sex"].max() <= 2:
+        df["sex"] = df["sex"] - 1
+        logger.info("Remapped sex from (1, 2) to (0, 1)")
+    
     # Filter out rows with invalid survival times (age_at_exit <= age_at_baseline)
     n_before = len(df)
     df = df[df["age_at_exit"] > df["age_at_baseline"]].copy()
