@@ -242,7 +242,12 @@ from amoris_bioage.data.schema import FEATURE_COLS
 cfg = load_config(_config_path)
 
 # Load preprocessed splits (raw values, not standardized)
-derived_dir = Path(cfg.data.derived_dir)
+# Resolve derived_dir relative to config file location
+config_dir = Path(_config_path).parent.resolve()
+derived_dir = (config_dir / cfg.data.derived_dir).resolve()
+if not derived_dir.exists():
+    raise FileNotFoundError(f"Derived directory not found: {derived_dir}")
+
 train_raw = pd.read_csv(derived_dir / "train.csv")
 val_raw = pd.read_csv(derived_dir / "val.csv")
 test_raw = pd.read_csv(derived_dir / "test.csv")
@@ -365,7 +370,7 @@ logger.info("Test: mean_advance=%.3f std_advance=%.3f", mean_advance_test, std_a
 # SAVE RESULTS
 # =========================================================================
 
-out_dir = Path(cfg.data.derived_dir).parent / "results"
+out_dir = (config_dir / cfg.data.derived_dir).parent / "results"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 # Determine output suffix based on biomarkers used
