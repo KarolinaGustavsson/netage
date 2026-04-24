@@ -439,11 +439,18 @@ val_phenoage, val_advance = compute_phenoage(
 val_raw["phenoage"] = val_phenoage
 val_raw["phenoage_advance"] = val_advance
 
-# C-index on validation
-val_cindex = concordance_index(
-    val_raw["age_at_exit"], -val_phenoage, val_raw["event"]
-)
-logger.info("Validation C-index (phenoage): %.4f", val_cindex)
+# C-index on validation (exclude NaN predictions)
+valid_mask = ~np.isnan(val_phenoage)
+if valid_mask.sum() > 0:
+    val_cindex = concordance_index(
+        val_raw.loc[valid_mask, "age_at_exit"],
+        -val_phenoage[valid_mask],
+        val_raw.loc[valid_mask, "event"],
+    )
+    logger.info("Validation C-index (phenoage): %.4f (%d valid individuals)", val_cindex, valid_mask.sum())
+else:
+    logger.warning("No valid phenoage values in validation set")
+    val_cindex = np.nan
 
 mean_advance_val = val_advance[~np.isnan(val_advance)].mean()
 std_advance_val = val_advance[~np.isnan(val_advance)].std()
@@ -475,11 +482,18 @@ test_phenoage, test_advance = compute_phenoage(
 test_raw["phenoage"] = test_phenoage
 test_raw["phenoage_advance"] = test_advance
 
-# C-index on test
-test_cindex = concordance_index(
-    test_raw["age_at_exit"], -test_phenoage, test_raw["event"]
-)
-logger.info("Test C-index (phenoage): %.4f", test_cindex)
+# C-index on test (exclude NaN predictions)
+valid_mask = ~np.isnan(test_phenoage)
+if valid_mask.sum() > 0:
+    test_cindex = concordance_index(
+        test_raw.loc[valid_mask, "age_at_exit"],
+        -test_phenoage[valid_mask],
+        test_raw.loc[valid_mask, "event"],
+    )
+    logger.info("Test C-index (phenoage): %.4f (%d valid individuals)", test_cindex, valid_mask.sum())
+else:
+    logger.warning("No valid phenoage values in test set")
+    test_cindex = np.nan
 
 mean_advance_test = test_advance[~np.isnan(test_advance)].mean()
 std_advance_test = test_advance[~np.isnan(test_advance)].std()
