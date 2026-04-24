@@ -8,6 +8,7 @@ Uses raw (non-standardized) biomarkers. Gompertz AFT model fitted via scipy MLE.
 Usage:
     python scripts/train_phenoage.py --config configs/default.yaml
     python scripts/train_phenoage.py --config configs/hpc.yaml --biomarkers s_alb s_krea tc tg s_k s_urea s_ld s_ca s_urat s_famn s_hapt fs_gluk
+    python scripts/train_phenoage.py --config configs/hpc.yaml --use-fixed-r-params --biomarkers s_alb s_krea tc tg s_k s_urea s_ld s_ca s_urat s_famn s_hapt fs_gluk
 """
 from __future__ import annotations
 
@@ -45,9 +46,19 @@ else:
         default=None,
         help="Subset of biomarkers to use (default: all 17 from schema)",
     )
+    parser.add_argument(
+        "--use-fixed-r-params",
+        action="store_true",
+        help="Use fixed coefficients/constants from validated R PhenoAge fit "
+        "(requires the 12-marker set + age_at_baseline).",
+    )
     args = parser.parse_args()
     _config_path = args.config
     _biomarkers = args.biomarkers
+    _use_fixed_r_params = args.use_fixed_r_params
+
+if "snakemake" in dir():
+    _use_fixed_r_params = bool(snakemake.params.get("use_fixed_r_params", False))  # type: ignore[name-defined]
 
 # ---------------------------------------------------------------------------
 # Gompertz AFT Model
@@ -65,6 +76,48 @@ class GompertzFit(NamedTuple):
     ba_n: float  # Numerator for biological age inversion
     ba_d: float  # Denominator for biological age inversion
     ba_i: float  # Intercept for biological age inversion
+
+
+FIXED_R_12_BIOMARKERS = [
+    "S_Alb",
+    "S_Krea",
+    "TC",
+    "TG",
+    "S_K",
+    "S_Urea",
+    "S_LD",
+    "S_Ca",
+    "S_Urat",
+    "S_FAMN",
+    "S_Hapt",
+    "fS_Gluk",
+]
+
+FIXED_R_PARAMS = {
+    "shape": 0.009158420,
+    "intercept_rate": -15.916979783,
+    "coef": {
+        "S_Alb": -0.018884985,
+        "S_Krea": 0.003261047,
+        "TC": -0.067074427,
+        "TG": 0.067258281,
+        "S_K": 0.040638444,
+        "S_Urea": -0.034342579,
+        "S_LD": 0.093231812,
+        "S_Ca": 0.226444053,
+        "S_Urat": 0.001997960,
+        "S_FAMN": -0.023583943,
+        "S_Hapt": 0.491393209,
+        "fS_Gluk": 0.103966622,
+        "age_at_baseline": 0.105375718,
+    },
+    "m_n": -2.001194,
+    "m_d": 0.009158420,
+    "ba_n": -0.008678262,
+    "ba_d": 0.1086148,
+    "ba_i": 124.5157,
+    "nobs": 10962,
+}
 
 
 def fit_gompertz_aft(
@@ -417,56 +470,86 @@ if missing_cols:
 
 logger.info("Fitting Gompertz AFT model on %d training individuals", len(train_raw))
 
-# Prepare design matrix: [1, biomarkers..., age]
-X_train = train_raw[biomarker_cols + ["age_at_baseline"]].values
-X_design_train = np.column_stack([np.ones(len(X_train)), X_train])
+if _use_fixed_r_params:
+    expected = set(FIXED_R_12_BIOMARKERS)
+    got = set(biomarker_cols)
+    if got != expected:
+        raise ValueError(
+            "Fixed R parameters require exactly the 12-marker set. "
+            f"Expected {sorted(expected)}, got {sorted(got)}"
+        )
 
-time_train = train_raw["age_at_exit"].values
-event_train = train_raw["event"].values
+    logger.info("Using fixed R PhenoAge parameters (nobs=%d)", FIXED_R_PARAMS["nobs"])
+    intercept = FIXED_R_PARAMS["intercept_rate"]
+    coef_dict = dict(FIXED_R_PARAMS["coef"])
 
-# Fit Gompertz for biomarkers + age
-shape, scale, coef = fit_gompertz_aft(time_train, event_train, X_design_train)
-logger.info("Gompertz shape=%.6f scale=%.6f", shape, scale)
+    coef_df = pd.DataFrame(
+        {"coef": [FIXED_R_PARAMS["shape"], intercept] + [coef_dict[c] for c in biomarker_cols] + [coef_dict["age_at_baseline"]]},
+        index=["shape", "rate"] + biomarker_cols + ["age"],
+    )
+    logger.info("Fixed coefficients:\n%s", coef_df.to_string())
 
-# Extract coefficients
-coef_df = pd.DataFrame(
-    {"coef": coef},
-    index=["intercept"] + biomarker_cols + ["age_at_baseline"],
-)
-logger.info("Fitted coefficients:\n%s", coef_df.to_string())
+    fit_obj = GompertzFit(
+        shape=FIXED_R_PARAMS["shape"],
+        scale=FIXED_R_PARAMS["m_d"],
+        coef=coef_df,
+        m_n=FIXED_R_PARAMS["m_n"],
+        m_d=FIXED_R_PARAMS["m_d"],
+        ba_n=FIXED_R_PARAMS["ba_n"],
+        ba_d=FIXED_R_PARAMS["ba_d"],
+        ba_i=FIXED_R_PARAMS["ba_i"],
+    )
+else:
+    # Prepare design matrix: [1, biomarkers..., age]
+    X_train = train_raw[biomarker_cols + ["age_at_baseline"]].values
+    X_design_train = np.column_stack([np.ones(len(X_train)), X_train])
 
-intercept = coef[0]
-coef_dict = {col: coef[i + 1] for i, col in enumerate(biomarker_cols + ["age_at_baseline"])}
+    time_train = train_raw["age_at_exit"].values
+    event_train = train_raw["event"].values
 
-# Compute mortality curve calibration parameters
-# Fit Gompertz on age only for reference
-time_train_ref = train_raw["age_at_exit"].values
-event_train_ref = train_raw["event"].values
-shape_age, scale_age = fit_gompertz_baseline(time_train_ref, event_train_ref)
+    # Fit Gompertz for biomarkers + age
+    shape, scale, coef = fit_gompertz_aft(time_train, event_train, X_design_train)
+    logger.info("Gompertz shape=%.6f scale=%.6f", shape, scale)
 
-# Mortality at t=120
-t_ref = 120
-m_n = -(np.exp(scale * t_ref) - 1)
-m_d = scale
+    # Extract coefficients
+    coef_df = pd.DataFrame(
+        {"coef": coef},
+        index=["intercept"] + biomarker_cols + ["age_at_baseline"],
+    )
+    logger.info("Fitted coefficients:\n%s", coef_df.to_string())
 
-ba_d = scale_age
-ba_n = -(np.exp(scale_age * t_ref) - 1)
-ba_i = (
-    -np.log(np.exp(scale_age * t_ref) - 1) - coef_df.loc["intercept", "coef"]
-) / ba_d
+    intercept = coef[0]
+    coef_dict = {col: coef[i + 1] for i, col in enumerate(biomarker_cols + ["age_at_baseline"])}
 
-logger.info("Calibration: m_n=%.6f m_d=%.6f ba_n=%.6f ba_d=%.6f ba_i=%.6f", m_n, m_d, ba_n, ba_d, ba_i)
+    # Compute mortality curve calibration parameters
+    # Fit Gompertz on age only for reference
+    time_train_ref = train_raw["age_at_exit"].values
+    event_train_ref = train_raw["event"].values
+    shape_age, scale_age = fit_gompertz_baseline(time_train_ref, event_train_ref)
 
-fit_obj = GompertzFit(
-    shape=shape,
-    scale=scale,
-    coef=coef_df,
-    m_n=m_n,
-    m_d=m_d,
-    ba_n=ba_n,
-    ba_d=ba_d,
-    ba_i=ba_i,
-)
+    # Mortality at t=120
+    t_ref = 120
+    m_n = -(np.exp(scale * t_ref) - 1)
+    m_d = scale
+
+    ba_d = scale_age
+    ba_n = -(np.exp(scale_age * t_ref) - 1)
+    ba_i = (
+        -np.log(np.exp(scale_age * t_ref) - 1) - coef_df.loc["intercept", "coef"]
+    ) / ba_d
+
+    logger.info("Calibration: m_n=%.6f m_d=%.6f ba_n=%.6f ba_d=%.6f ba_i=%.6f", m_n, m_d, ba_n, ba_d, ba_i)
+
+    fit_obj = GompertzFit(
+        shape=shape,
+        scale=scale,
+        coef=coef_df,
+        m_n=m_n,
+        m_d=m_d,
+        ba_n=ba_n,
+        ba_d=ba_d,
+        ba_i=ba_i,
+    )
 
 # =========================================================================
 # VALIDATION: Project onto val set and compute phenoage
@@ -569,6 +652,8 @@ if _biomarkers is not None:
     suffix = "_subset"
 else:
     suffix = "_all17"
+if _use_fixed_r_params:
+    suffix = f"{suffix}_fixedR"
 
 val_raw.to_csv(out_dir / f"phenoage_val{suffix}.csv", index=False)
 test_raw.to_csv(out_dir / f"phenoage_test{suffix}.csv", index=False)
