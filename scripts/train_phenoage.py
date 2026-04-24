@@ -232,6 +232,47 @@ def compute_phenoage(
     return phenoage, phenoage_advance
 
 
+def _safe_cindex(
+    df: pd.DataFrame, predicted_scores: np.ndarray, label: str
+) -> tuple[float, int]:
+    """Compute C-index after dropping non-finite rows in all inputs.
+
+    lifelines raises a generic "NaNs detected" ValueError for invalid scoring
+    arrays; this helper makes filtering explicit and logs what was removed.
+    """
+    times = df["age_at_exit"].to_numpy(dtype=float)
+    events = df["event"].to_numpy(dtype=float)
+    scores = np.asarray(predicted_scores, dtype=float)
+
+    finite_mask = np.isfinite(times) & np.isfinite(events) & np.isfinite(scores)
+    valid_n = int(finite_mask.sum())
+    total_n = int(len(df))
+    dropped_n = total_n - valid_n
+
+    if dropped_n > 0:
+        logger.warning(
+            "%s: dropped %d/%d rows before C-index due to non-finite values "
+            "(time=%d, event=%d, score=%d)",
+            label,
+            dropped_n,
+            total_n,
+            int((~np.isfinite(times)).sum()),
+            int((~np.isfinite(events)).sum()),
+            int((~np.isfinite(scores)).sum()),
+        )
+
+    if valid_n == 0:
+        logger.warning("%s: no valid rows for C-index after filtering", label)
+        return np.nan, 0
+
+    cidx = concordance_index(
+        times[finite_mask],
+        scores[finite_mask],
+        events[finite_mask],
+    )
+    return float(cidx), valid_n
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -440,20 +481,21 @@ val_raw["phenoage"] = val_phenoage
 val_raw["phenoage_advance"] = val_advance
 
 # C-index on validation (exclude NaN predictions)
-valid_mask = ~np.isnan(val_phenoage)
-if valid_mask.sum() > 0:
-    val_cindex = concordance_index(
-        val_raw.loc[valid_mask, "age_at_exit"],
-        -val_phenoage[valid_mask],
-        val_raw.loc[valid_mask, "event"],
+val_cindex, val_valid_n = _safe_cindex(
+    val_raw,
+    -val_phenoage,
+    label="Validation C-index (phenoage)",
+)
+if val_valid_n > 0:
+    logger.info(
+        "Validation C-index (phenoage): %.4f (%d valid individuals)",
+        val_cindex,
+        val_valid_n,
     )
-    logger.info("Validation C-index (phenoage): %.4f (%d valid individuals)", val_cindex, valid_mask.sum())
-else:
-    logger.warning("No valid phenoage values in validation set")
-    val_cindex = np.nan
 
-mean_advance_val = val_advance[~np.isnan(val_advance)].mean()
-std_advance_val = val_advance[~np.isnan(val_advance)].std()
+val_adv_mask = np.isfinite(val_advance)
+mean_advance_val = val_advance[val_adv_mask].mean() if val_adv_mask.any() else np.nan
+std_advance_val = val_advance[val_adv_mask].std() if val_adv_mask.any() else np.nan
 logger.info("Validation: mean_advance=%.3f std_advance=%.3f", mean_advance_val, std_advance_val)
 
 # Compare with R phenoage if available
@@ -483,20 +525,21 @@ test_raw["phenoage"] = test_phenoage
 test_raw["phenoage_advance"] = test_advance
 
 # C-index on test (exclude NaN predictions)
-valid_mask = ~np.isnan(test_phenoage)
-if valid_mask.sum() > 0:
-    test_cindex = concordance_index(
-        test_raw.loc[valid_mask, "age_at_exit"],
-        -test_phenoage[valid_mask],
-        test_raw.loc[valid_mask, "event"],
+test_cindex, test_valid_n = _safe_cindex(
+    test_raw,
+    -test_phenoage,
+    label="Test C-index (phenoage)",
+)
+if test_valid_n > 0:
+    logger.info(
+        "Test C-index (phenoage): %.4f (%d valid individuals)",
+        test_cindex,
+        test_valid_n,
     )
-    logger.info("Test C-index (phenoage): %.4f (%d valid individuals)", test_cindex, valid_mask.sum())
-else:
-    logger.warning("No valid phenoage values in test set")
-    test_cindex = np.nan
 
-mean_advance_test = test_advance[~np.isnan(test_advance)].mean()
-std_advance_test = test_advance[~np.isnan(test_advance)].std()
+test_adv_mask = np.isfinite(test_advance)
+mean_advance_test = test_advance[test_adv_mask].mean() if test_adv_mask.any() else np.nan
+std_advance_test = test_advance[test_adv_mask].std() if test_adv_mask.any() else np.nan
 logger.info("Test: mean_advance=%.3f std_advance=%.3f", mean_advance_test, std_advance_test)
 
 # Compare with R phenoage if available
