@@ -241,15 +241,21 @@ from amoris_bioage.data.schema import FEATURE_COLS
 
 cfg = load_config(_config_path)
 
-# Resolve paths relative to project root (parent of config dir)
-config_dir = Path(_config_path).parent.resolve()
-project_root = config_dir.parent  # Go up from configs/ to project root
-derived_dir = (project_root / cfg.data.derived_dir).resolve()
-
-if not derived_dir.exists():
-    raise FileNotFoundError(f"Derived directory not found: {derived_dir}")
+# Resolve paths relative to project root
+config_path = Path(_config_path)
+if config_path.is_absolute():
+    project_root = config_path.parent.parent
+else:
+    # Relative path - resolve from cwd
+    project_root = Path.cwd()
 
 logger.info("Project root: %s", project_root)
+
+# Construct derived directory path
+derived_dir = project_root / cfg.data.derived_dir
+if not derived_dir.exists():
+    raise FileNotFoundError(f"Derived directory not found: {derived_dir} (looked relative to {project_root})")
+
 logger.info("Loading preprocessed splits from: %s", derived_dir)
 
 # Load the preprocessor to get the same split indices
