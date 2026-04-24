@@ -326,6 +326,20 @@ def _safe_cindex(
     return float(cidx), valid_n
 
 
+def _zscore_finite(x: np.ndarray) -> np.ndarray:
+    """Z-score finite values; keep non-finite entries as NaN."""
+    out = np.full(len(x), np.nan, dtype=float)
+    mask = np.isfinite(x)
+    if not mask.any():
+        return out
+    vals = x[mask]
+    std = vals.std()
+    if std <= 0:
+        return out
+    out[mask] = (vals - vals.mean()) / std
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -581,6 +595,10 @@ val_phenoage, val_advance = compute_phenoage(
 
 val_raw["phenoage"] = val_phenoage
 val_raw["phenoage_advance"] = val_advance
+val_raw["phenoage_advance_sd"] = _zscore_finite(val_advance)
+# Explicit age-gap convention (chronological - biological), as requested.
+val_raw["phenoage_gap"] = val_raw["age_at_baseline"] - val_raw["phenoage"]
+val_raw["phenoage_gap_sd"] = _zscore_finite(val_raw["phenoage_gap"].to_numpy(dtype=float))
 
 # C-index on validation (exclude NaN predictions)
 val_cindex, val_valid_n = _safe_cindex(
@@ -625,6 +643,10 @@ test_phenoage, test_advance = compute_phenoage(
 
 test_raw["phenoage"] = test_phenoage
 test_raw["phenoage_advance"] = test_advance
+test_raw["phenoage_advance_sd"] = _zscore_finite(test_advance)
+# Explicit age-gap convention (chronological - biological), as requested.
+test_raw["phenoage_gap"] = test_raw["age_at_baseline"] - test_raw["phenoage"]
+test_raw["phenoage_gap_sd"] = _zscore_finite(test_raw["phenoage_gap"].to_numpy(dtype=float))
 
 # C-index on test (exclude NaN predictions)
 test_cindex, test_valid_n = _safe_cindex(

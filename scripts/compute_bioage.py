@@ -88,6 +88,21 @@ bioage_est = BiologicalAgeEstimator(
 bioage_est.fit_reference(breslow)
 
 
+def _zscore_finite(x: pd.Series) -> np.ndarray:
+    """Z-score finite values; keep non-finite entries as NaN."""
+    arr = x.to_numpy(dtype=float)
+    out = np.full(len(arr), np.nan, dtype=float)
+    mask = np.isfinite(arr)
+    if not mask.any():
+        return out
+    vals = arr[mask]
+    std = vals.std()
+    if std <= 0:
+        return out
+    out[mask] = (vals - vals.mean()) / std
+    return out
+
+
 def _compute_bioage_for_split(split_path: Path) -> pd.DataFrame:
     df = pd.read_csv(split_path)
     features_t = torch.tensor(df[feature_cols].values, dtype=torch.float32).to(device)
@@ -100,6 +115,7 @@ def _compute_bioage_for_split(split_path: Path) -> pd.DataFrame:
     result = df[["id", "sex", "age_at_baseline", "age_at_exit", "event"]].copy()
     result["g"] = g
     result["delta"] = delta
+    result["delta_sd"] = _zscore_finite(result["delta"])
     return result
 
 

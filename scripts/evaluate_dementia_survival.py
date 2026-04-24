@@ -69,7 +69,14 @@ def _cox_age_timescale(df: pd.DataFrame, score_col: str) -> dict[str, float | in
     model_df = model_df.replace([np.inf, -np.inf], np.nan).dropna()
     if model_df.empty:
         raise ValueError(f"No valid rows after filtering for score '{score_col}'")
-    if int(model_df["dementia_event"].sum()) == 0:
+    n_events = int(model_df["dementia_event"].sum())
+    logger.info(
+        "%s Cox input: N=%d dementia_events=%d",
+        score_col,
+        len(model_df),
+        n_events,
+    )
+    if n_events == 0:
         raise ValueError(f"No dementia events available for score '{score_col}'")
 
     # If sex has no variation in this subset, drop it from the model.
@@ -157,6 +164,17 @@ def _finegray(df: pd.DataFrame, score_col: str) -> dict[str, float | int | str]:
     model_df = model_df[model_df["followup"] > 0].copy()
     if model_df.empty:
         raise ValueError(f"No valid rows for Fine-Gray with score '{score_col}'")
+    n_dementia = int((model_df["fg_event"] == 1).sum())
+    n_death = int((model_df["fg_event"] == 2).sum())
+    logger.info(
+        "%s Fine-Gray input: N=%d dementia=%d death=%d",
+        score_col,
+        len(model_df),
+        n_dementia,
+        n_death,
+    )
+    if n_dementia == 0:
+        raise ValueError(f"No dementia events available for Fine-Gray score '{score_col}'")
 
     # Try lifelines FineAndGray first.
     try:
@@ -280,11 +298,23 @@ def main() -> None:
         [1, 2],
         default=0,
     ).astype(int)
+    logger.info(
+        "Raw dementia/death coding counts: dementia=%d death=%d censored=%d",
+        int((raw_df["fg_event"] == 1).sum()),
+        int((raw_df["fg_event"] == 2).sum()),
+        int((raw_df["fg_event"] == 0).sum()),
+    )
 
     score_files = [Path(p) for p in args.score_files]
     df = _load_and_merge_scores(raw_df, score_files) if score_files else raw_df.copy()
     if args.ids_file:
         df = _subset_to_ids(df, Path(args.ids_file))
+    logger.info(
+        "Analysis-set dementia/death counts: dementia=%d death=%d censored=%d",
+        int((df["fg_event"] == 1).sum()),
+        int((df["fg_event"] == 2).sum()),
+        int((df["fg_event"] == 0).sum()),
+    )
 
     missing_scores = [c for c in args.score_cols if c not in df.columns]
     if missing_scores:
@@ -293,8 +323,50 @@ def main() -> None:
     rows: list[dict[str, float | int | str]] = []
     for score_col in args.score_cols:
         logger.info("Running dementia models for score: %s", score_col)
-        rows.append(_cox_age_timescale(df, score_col))
-        rows.append(_finegray(df, score_col))
+        try:
+            rows.append(_cox_age_timescale(df, score_col))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cox failed for %s: %s", score_col, exc)
+            rows.append(
+                {
+                    "score": score_col,
+                    "model": "CoxPH age-timescale sex-adjusted",
+                    "beta": np.nan,
+                    "se": np.nan,
+                    "HR": np.nan,
+                    "lb": np.nan,
+                    "ub": np.nan,
+                    "p": np.nan,
+                    "p_PH_score": np.nan,
+                    "global_p_PH": np.nan,
+                    "concordance": np.nan,
+                    "N": 0,
+                    "std_beta": np.nan,
+                    "error": str(exc),
+                }
+            )
+        try:
+            rows.append(_finegray(df, score_col))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Fine-Gray failed for %s: %s", score_col, exc)
+            rows.append(
+                {
+                    "score": score_col,
+                    "model": "FineGray subdistribution sex-adjusted",
+                    "beta": np.nan,
+                    "se": np.nan,
+                    "HR": np.nan,
+                    "lb": np.nan,
+                    "ub": np.nan,
+                    "p": np.nan,
+                    "p_PH_score": np.nan,
+                    "global_p_PH": np.nan,
+                    "concordance": np.nan,
+                    "N": 0,
+                    "std_beta": np.nan,
+                    "error": str(exc),
+                }
+            )
 
     out_df = pd.DataFrame(rows)
     out_csv = Path(args.out_csv)
