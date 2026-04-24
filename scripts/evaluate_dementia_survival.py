@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter
+from lifelines.exceptions import ConvergenceError
 from lifelines.statistics import proportional_hazard_test
 
 from amoris_bioage.config import load_config
@@ -68,15 +69,43 @@ def _cox_age_timescale(df: pd.DataFrame, score_col: str) -> dict[str, float | in
     model_df = model_df.replace([np.inf, -np.inf], np.nan).dropna()
     if model_df.empty:
         raise ValueError(f"No valid rows after filtering for score '{score_col}'")
+    if int(model_df["dementia_event"].sum()) == 0:
+        raise ValueError(f"No dementia events available for score '{score_col}'")
 
-    cph = CoxPHFitter()
-    cph.fit(
-        model_df,
-        duration_col="age_at_exit",
-        event_col="dementia_event",
-        entry_col="age_at_baseline",
-        formula=f"{score_col} + sex",
-    )
+    # If sex has no variation in this subset, drop it from the model.
+    include_sex = model_df["sex"].nunique() > 1
+    formula = f"{score_col} + sex" if include_sex else f"{score_col}"
+    if not include_sex:
+        logger.warning("%s: sex has no variation after filtering, fitting without sex", score_col)
+
+    # Robust fitting: try unpenalized first, then mild ridge penalties.
+    fit_ok = False
+    last_exc: Exception | None = None
+    for penalizer in (0.0, 1e-6, 1e-4, 1e-2):
+        cph = CoxPHFitter(penalizer=penalizer)
+        try:
+            cph.fit(
+                model_df,
+                duration_col="age_at_exit",
+                event_col="dementia_event",
+                entry_col="age_at_baseline",
+                formula=formula,
+            )
+            fit_ok = True
+            if penalizer > 0:
+                logger.warning(
+                    "%s: Cox converged with penalizer=%g", score_col, penalizer
+                )
+            break
+        except ConvergenceError as exc:
+            last_exc = exc
+            logger.warning(
+                "%s: Cox failed with penalizer=%g (%s)", score_col, penalizer, exc
+            )
+    if not fit_ok:
+        raise RuntimeError(
+            f"CoxPH failed to converge for '{score_col}' even with penalization."
+        ) from last_exc
 
     row = cph.summary.loc[score_col]
     beta = float(row["coef"])
@@ -134,14 +163,24 @@ def _finegray(df: pd.DataFrame, score_col: str) -> dict[str, float | int | str]:
         from lifelines import FineAndGrayFitter  # type: ignore
 
         fg = FineAndGrayFitter()
+        include_sex = model_df["sex"].nunique() > 1
         try:
-            fg.fit(
-                model_df,
-                duration_col="followup",
-                event_col="fg_event",
-                event_of_interest=1,
-                formula=f"{score_col} + sex",
-            )
+            if include_sex:
+                fg.fit(
+                    model_df,
+                    duration_col="followup",
+                    event_col="fg_event",
+                    event_of_interest=1,
+                    formula=f"{score_col} + sex",
+                )
+            else:
+                fg.fit(
+                    model_df,
+                    duration_col="followup",
+                    event_col="fg_event",
+                    event_of_interest=1,
+                    formula=f"{score_col}",
+                )
         except TypeError:
             fg.fit(
                 model_df,
@@ -153,7 +192,10 @@ def _finegray(df: pd.DataFrame, score_col: str) -> dict[str, float | int | str]:
         # If formula was unsupported in this lifelines version, refit using only
         # the required columns and rely on default covariate inclusion.
         if score_col not in fg.summary.index:
-            fg_df = model_df[["followup", "fg_event", score_col, "sex"]].copy()
+            base_cols = ["followup", "fg_event", score_col]
+            if include_sex:
+                base_cols.append("sex")
+            fg_df = model_df[base_cols].copy()
             fg.fit(
                 fg_df,
                 duration_col="followup",
