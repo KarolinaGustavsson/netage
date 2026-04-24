@@ -400,7 +400,22 @@ logger.info("Splits from raw data: train=%d val=%d test=%d",
 
 # Determine biomarkers to use
 if _biomarkers is not None:
-    biomarker_cols = [b.upper() for b in _biomarkers]  # Normalize to uppercase
+    # Resolve user-provided biomarker names case-insensitively to canonical
+    # column names present in the raw dataframe.
+    col_lookup = {c.lower(): c for c in df_raw.columns}
+    biomarker_cols = []
+    unresolved = []
+    for b in _biomarkers:
+        canonical = col_lookup.get(b.lower())
+        if canonical is None:
+            unresolved.append(b)
+        else:
+            biomarker_cols.append(canonical)
+    if unresolved:
+        raise ValueError(
+            "Could not resolve biomarker name(s) in raw data columns: "
+            f"{unresolved}"
+        )
     logger.info("Using specified biomarkers: %s", biomarker_cols)
 else:
     biomarker_cols = FEATURE_COLS
@@ -478,6 +493,10 @@ if _use_fixed_r_params:
             "Fixed R parameters require exactly the 12-marker set. "
             f"Expected {sorted(expected)}, got {sorted(got)}"
         )
+    if "OG_phenoage" in df_raw.columns:
+        logger.info("Fixed-R mode: OG_phenoage comparison is enabled")
+    else:
+        logger.warning("Fixed-R mode: OG_phenoage column not found; cannot compare to R precomputed values")
 
     logger.info("Using fixed R PhenoAge parameters (nobs=%d)", FIXED_R_PARAMS["nobs"])
     intercept = FIXED_R_PARAMS["intercept_rate"]
