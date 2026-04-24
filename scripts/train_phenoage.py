@@ -241,16 +241,48 @@ from amoris_bioage.data.schema import FEATURE_COLS
 
 cfg = load_config(_config_path)
 
-# Load preprocessed splits (raw values, not standardized)
-# Resolve derived_dir relative to config file location
+# Resolve paths relative to project root (parent of config dir)
 config_dir = Path(_config_path).parent.resolve()
-derived_dir = (config_dir / cfg.data.derived_dir).resolve()
+project_root = config_dir.parent  # Go up from configs/ to project root
+derived_dir = (project_root / cfg.data.derived_dir).resolve()
+
 if not derived_dir.exists():
     raise FileNotFoundError(f"Derived directory not found: {derived_dir}")
 
-train_raw = pd.read_csv(derived_dir / "train.csv")
-val_raw = pd.read_csv(derived_dir / "val.csv")
-test_raw = pd.read_csv(derived_dir / "test.csv")
+logger.info("Project root: %s", project_root)
+logger.info("Loading preprocessed splits from: %s", derived_dir)
+
+# Load the preprocessor to get the same split indices
+preprocessor_path = derived_dir / "preprocessor.pkl"
+if not preprocessor_path.exists():
+    raise FileNotFoundError(f"Preprocessor not found: {preprocessor_path}")
+
+with open(preprocessor_path, "rb") as f:
+    preprocessor = pickle.load(f)
+
+logger.info("Loaded preprocessor (fitted on %d features)", len(preprocessor.feature_cols))
+
+# Load raw data
+logger.info("Loading raw data from %s", cfg.data.raw_path)
+from amoris_bioage.data.loader import load_raw
+df_raw = load_raw(cfg.data.raw_path)
+
+# Load preprocessed splits to get the same indices
+train_pp = pd.read_csv(derived_dir / "train.csv")
+val_pp = pd.read_csv(derived_dir / "val.csv")
+test_pp = pd.read_csv(derived_dir / "test.csv")
+
+# Get IDs from preprocessed splits to filter raw data
+train_ids = set(train_pp["id"].values)
+val_ids = set(val_pp["id"].values)
+test_ids = set(test_pp["id"].values)
+
+train_raw = df_raw[df_raw["id"].isin(train_ids)].copy()
+val_raw = df_raw[df_raw["id"].isin(val_ids)].copy()
+test_raw = df_raw[df_raw["id"].isin(test_ids)].copy()
+
+logger.info("Splits from raw data: train=%d val=%d test=%d", 
+            len(train_raw), len(val_raw), len(test_raw))
 
 # Determine biomarkers to use
 if _biomarkers is not None:
@@ -263,11 +295,64 @@ else:
 # Verify biomarkers exist in data
 missing = set(biomarker_cols) - set(train_raw.columns)
 if missing:
-    raise ValueError(f"Missing biomarkers in data: {missing}")
+    raise ValueError(f"Missing biomarkers in raw data: {missing}")
+
+# Check for excessive missingness
+for col in biomarker_cols:
+    miss_train = train_raw[col].isna().mean()
+    miss_val = val_raw[col].isna().mean()
+    miss_test = test_raw[col].isna().mean()
+    if miss_train > 0.5:
+        logger.warning(
+            "Biomarker %s has %.1f%% missing in training set",
+            col,
+            miss_train * 100,
+        )
+    if miss_val > 0.5 or miss_test > 0.5:
+        logger.warning(
+            "Biomarker %s has %.1f%% missing in val, %.1f%% in test",
+            col,
+            miss_val * 100,
+            miss_test * 100,
+        )
+
+# Remove rows with any biomarker NaN (simplified approach; could impute instead)
+n_before_train = len(train_raw)
+train_raw = train_raw.dropna(subset=biomarker_cols + ["age_at_baseline", "age_at_exit", "event"])
+n_after_train = len(train_raw)
+if n_after_train < n_before_train:
+    logger.warning(
+        "Removed %d rows with missing biomarkers from training set",
+        n_before_train - n_after_train,
+    )
+
+n_before_val = len(val_raw)
+val_raw = val_raw.dropna(subset=biomarker_cols + ["age_at_baseline", "age_at_exit", "event"])
+n_after_val = len(val_raw)
+if n_after_val < n_before_val:
+    logger.warning(
+        "Removed %d rows with missing biomarkers from validation set",
+        n_before_val - n_after_val,
+    )
+
+n_before_test = len(test_raw)
+test_raw = test_raw.dropna(subset=biomarker_cols + ["age_at_baseline", "age_at_exit", "event"])
+n_after_test = len(test_raw)
+if n_after_test < n_before_test:
+    logger.warning(
+        "Removed %d rows with missing biomarkers from test set",
+        n_before_test - n_after_test,
+    )
 
 # =========================================================================
 # TRAINING: Fit Gompertz on training set
 # =========================================================================
+
+# Verify required columns
+required_cols = biomarker_cols + ["age_at_baseline", "age_at_exit", "event"]
+missing_cols = set(required_cols) - set(train_raw.columns)
+if missing_cols:
+    raise ValueError(f"Missing required columns: {missing_cols}")
 
 logger.info("Fitting Gompertz AFT model on %d training individuals", len(train_raw))
 
@@ -370,8 +455,9 @@ logger.info("Test: mean_advance=%.3f std_advance=%.3f", mean_advance_test, std_a
 # SAVE RESULTS
 # =========================================================================
 
-out_dir = (config_dir / cfg.data.derived_dir).parent / "results"
+out_dir = project_root / "outputs" / "results"
 out_dir.mkdir(parents=True, exist_ok=True)
+logger.info("Output directory: %s", out_dir)
 
 # Determine output suffix based on biomarkers used
 if _biomarkers is not None:
