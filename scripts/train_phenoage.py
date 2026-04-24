@@ -273,6 +273,20 @@ logger.info("Loading raw data from %s", cfg.data.raw_path)
 from amoris_bioage.data.loader import load_raw
 df_raw = load_raw(cfg.data.raw_path)
 
+# Check for precomputed R phenoage columns and rename them
+og_phenoage_cols = {}
+for col in ["phenoage", "phenoage_advance", "phenoage_sd", "phenoage_SD"]:
+    if col in df_raw.columns:
+        og_col = f"OG_{col}"
+        df_raw.rename(columns={col: og_col}, inplace=True)
+        og_phenoage_cols[col] = og_col
+        logger.info("Found precomputed %s → renamed to %s", col, og_col)
+
+if og_phenoage_cols:
+    logger.info("Will compare Python phenoage against R precomputed values")
+else:
+    logger.info("No precomputed R phenoage columns found")
+
 # Load preprocessed splits to get the same indices
 train_pp = pd.read_csv(derived_dir / "train.csv")
 val_pp = pd.read_csv(derived_dir / "val.csv")
@@ -435,6 +449,20 @@ mean_advance_val = val_advance[~np.isnan(val_advance)].mean()
 std_advance_val = val_advance[~np.isnan(val_advance)].std()
 logger.info("Validation: mean_advance=%.3f std_advance=%.3f", mean_advance_val, std_advance_val)
 
+# Compare with R phenoage if available
+if "OG_phenoage" in val_raw.columns:
+    valid_mask = ~(np.isnan(val_phenoage) | val_raw["OG_phenoage"].isna())
+    if valid_mask.sum() > 0:
+        phenoage_diff = val_raw.loc[valid_mask, "OG_phenoage"].values - val_phenoage[valid_mask]
+        logger.info(
+            "Validation phenoage_diff (R - Python): mean=%.3f std=%.3f min=%.3f max=%.3f",
+            phenoage_diff.mean(),
+            phenoage_diff.std(),
+            phenoage_diff.min(),
+            phenoage_diff.max(),
+        )
+        val_raw["phenoage_diff"] = val_raw["OG_phenoage"] - val_phenoage
+
 # =========================================================================
 # TEST: Project onto test set
 # =========================================================================
@@ -456,6 +484,20 @@ logger.info("Test C-index (phenoage): %.4f", test_cindex)
 mean_advance_test = test_advance[~np.isnan(test_advance)].mean()
 std_advance_test = test_advance[~np.isnan(test_advance)].std()
 logger.info("Test: mean_advance=%.3f std_advance=%.3f", mean_advance_test, std_advance_test)
+
+# Compare with R phenoage if available
+if "OG_phenoage" in test_raw.columns:
+    valid_mask = ~(np.isnan(test_phenoage) | test_raw["OG_phenoage"].isna())
+    if valid_mask.sum() > 0:
+        phenoage_diff = test_raw.loc[valid_mask, "OG_phenoage"].values - test_phenoage[valid_mask]
+        logger.info(
+            "Test phenoage_diff (R - Python): mean=%.3f std=%.3f min=%.3f max=%.3f",
+            phenoage_diff.mean(),
+            phenoage_diff.std(),
+            phenoage_diff.min(),
+            phenoage_diff.max(),
+        )
+        test_raw["phenoage_diff"] = test_raw["OG_phenoage"] - test_phenoage
 
 # =========================================================================
 # SAVE RESULTS
